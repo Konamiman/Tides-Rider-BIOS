@@ -1,0 +1,27 @@
+syntax: glob
+
+.vs/
+.vscode/
+bin/**
+*.sym
+*.SYM
+*.lst
+*.map
+*.noi
+*.rel
+*.REL
+*.hex
+*.HEX
+*.bin
+*.BIN
+*.ihx
+*.IHX
+*.lk
+*.LK
+*.orig
+*.rej
+*.LST
+*.rom
+*.ROM
+
+
