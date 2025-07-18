@@ -1,3 +1,41 @@
+.COMMENT \
+
+Strategy for initializing the Z280 at boot:
+
+BOOT:
+	Z280 booted flag set?
+	No:
+		di
+		Set RAM in page 0
+		Set jump tp BOOT280 in address 0
+		call CHGCPU(Z280)
+		if address 0 has a 0
+			Z280 was found and has booted
+			Set Z280 booted
+		Restore BIOS in page 0
+		if Z280 has booted
+			Set Z280 booted flag
+			Initialize UNAPI
+	if Z280 booted flag set
+		call CHGCPU(Z280)
+		Init Z280 registers and RAM
+		call CHGCPU(Z80)
+    ei
+	ret
+
+CHGCPU:
+	push push...
+CHGCPU2:
+	change CPU!
+	pop pop...
+	ret
+
+BOOT280:
+	Set 0 in address 0
+	jp CHGCPU2(Z80)
+
+\
+
     public BOOT.RUN
     extrn GETSLT2
     extrn UNAPI.SPEC_NAME
