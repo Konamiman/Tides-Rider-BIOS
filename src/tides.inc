@@ -1,3 +1,5 @@
+; Include file with constants related to the Tides Rider
+
     ifndef RAM_SLOT
 RAM_SLOT: equ 10001011b
     endif

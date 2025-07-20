@@ -1,3 +1,14 @@
+    title Tides Rider BIOS with Z280 support
+    subttl UNAPI handler
+
+.COMMENT \
+
+This file contains all the UNAPI related code: the EXTBIO hook handler,
+the functions entry point, and the functions themselves.
+The code that patches the EXTBIO hook is in boot.asm
+
+\
+
     public UNAPI.SPEC_NAME
     public UNAPI.SPEC_NAME_LENGTH
     public UNAPI.IMPL_NAME
@@ -6,9 +17,9 @@
     public UNAPI.ENTRY_POINT
     extrn ALLOC.RUN
     extrn GETSLT2
-    extrn GETSLT3
-    extrn GETWRK
     extrn TOUPPER
+    extrn CHGCPU.RUN
+    extrn Z280.INIT
 
     .extroot
 
@@ -27,7 +38,7 @@ ROM_V_S:  equ  0
 ;--- Maximum number of available standard and implementation-specific function numbers
 
 ;Must be 0 to 127
-MAX_FN:    equ  2
+MAX_FN:    equ  ((FN_TABLE_END-FN_TABLE)/2)-1
 
 ;Must be either zero (if no implementation-specific functions available), or 128 to 254
 MAX_IMPFN:  equ  0
@@ -173,9 +184,14 @@ UNDEFINED:
 ;--- Standard routines addresses table
 
 FN_TABLE:
-FN_0:  dw  FN_INFO
-FN_1:  dw  FN_ADD
-FN_2:  dw  FN_MULT
+FN_0: dw FN_INFO
+FN_1: dw FN_Z280INFO
+FN_2: dw FN_INITZ280
+FN_3: dw FN_RUNZ280_MSX
+FN_4: dw FN_RUNZ280_Z280
+FN_5: dw FN_COPY_MSX_TO_Z280
+FN_6: dw FN_COPY_Z280_TO_MSX
+FN_TABLE_END:
 
 
 ;--- Implementation-specific routines addresses table
@@ -206,31 +222,77 @@ FN_INFO:
     xor a
     ret
 
-;TODO: Replace the FN_* routines below with the appropriate routines for your implementation
 
-;--- Sample routine 1: adds two 8-bit numbers
-;    Input: E, L = Numbers to add
-;    Output: HL = Result
+;--- Routine 1: return information about the Z280 system
+;    Input:  A = 1
+;            B = Information block to return, only block 0 supported for now
+;                The output when specifying an invalid block number is undefined
+;    Output: A = Flags:
+;                bit 0: 0 for Z280-on-demand system, 1 for native Z280 system
+;            HL = Size of Z280 RAM in KB
 
-FN_ADD:
-    ld  h,0
-    ld  d,0
-    add  hl,de
+FN_Z280INFO:
+    xor a
+    ld hl,1024 ;TODO: Actually calculate the Z280RAM size
     ret
 
 
-;--- Sample routine 2: multiplies two 8-bit numbers
-;    Input: E, L = Numbers to multiply
-;    Output: HL = Result
+;--- Routine 2: reinitialize the Z280 control registers and MMU mappings
+;    Input: -
+;    Output: -
 
-FN_MULT:
-    ld  b,e
-    ld  e,l
-    ld  d,0
-    ld  hl,0
-MULT_LOOP:
-    add  hl,de
-    djnz  MULT_LOOP
+FN_INITZ280:
+    ld a,1
+    call CHGCPU.RUN
+
+    call Z280.INIT
+
+    xor a
+    jp CHGCPU.RUN
+
+
+;--- Routine 3: run a Z280 program in MSX memory
+;    Input: All registers as they will be accepted by the Z280 program
+;           Program address at TEMP9 (F7B8h)
+;           AF for the program at TEMP8 (F69Fh)
+;    Output: All registers as returned by the Z280 program
+
+FN_RUNZ280_MSX:
+    ;TODO: Implement this thing!
+    ret
+
+
+;--- Routine 4: run a Z280 program in Z280 memory
+;    Input: All registers as they will be accepted by the Z280 program
+;           Program address at TEMP9 (F7B8h)
+;           AF for the program at TEMP8 (F69Fh)
+;           Z280 RAM page id at TEMP3 (F69Dh)
+;    Output: All registers as returned by the Z280 program
+
+FN_RUNZ280_Z280:
+    ;TODO: Implement this thing!
+    ret
+
+
+;--- Routine 5: copy data from the MSX memory to Z280 memory
+;    Input: HL = source address in MSX memory
+;           DE = destination address in Z280 memory
+;           BC = length
+;           The values for DE and DE+BC-1 must be in the same 4K page range
+
+FN_COPY_MSX_TO_Z280:
+    ;TODO: Implement this thing!
+    ret
+
+
+;--- Routine 6: copy data from the Z280 memory to MSX memory
+;    Input: HL = source address in Z280 memory
+;           DE = destination address in MSX memory
+;           BC = length
+;           The values for HL and HL+BC-1 must be in the same 4K page range
+
+FN_COPY_Z280_TO_MSX:
+    ;TODO: Implement this thing!
     ret
 
 

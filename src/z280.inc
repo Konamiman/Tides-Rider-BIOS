@@ -1,3 +1,6 @@
+; Include file with constants related to the Z280 CPU
+
+
     module Z280.CONTROL_REGISTERS
 
 MSR: equ 00h
@@ -12,6 +15,7 @@ CACHE_CONTROL: equ 12h
 LOCAL_ADDRESS: equ 14h
 
     endmod
+
 
     module Z280.MMU_PORTS
 

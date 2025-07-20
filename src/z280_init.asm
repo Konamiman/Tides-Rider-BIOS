@@ -1,5 +1,19 @@
+    title Tides Rider BIOS with Z280 support
+    subttl Z280 initialization code
+
+.COMMENT \
+
+This routine initializes the Z280 processor to its initial state
+(control registers and MMU descriptors). It runs at boot time
+and before a Z280 program is executed, but can also be executed manually
+via a dedicated UNAPI routine.
+
+See the comments in the file for the details on how the Z280 is initialized.
+
+\
+
+    public Z280.INIT
     extrn Z280.RESIDENT_CODE ;Assumed to be A000h
-    extrn Z280.INT_TRAP_VECTOR
 
     module Z280
 
@@ -8,7 +22,7 @@ USE_CACHE: equ 3 ;0 = no, 1 = data, 2 = instructions, 3 = both
     endif
 
     ifndef Z280.USE_IM3
-USE_IM3: equ 1
+USE_IM3: equ 1 ;0 = no (use IM 1), 1 = yes
     endif
 
     ifndef Z280.RESIDENT_CODE_START_ADDRESS
@@ -63,25 +77,25 @@ INIT:
     ;--- Copy the resident code and configure the MMU
 
     ;Configure the MMU page descriptors so they match the MSX addressing space
-    ;(so the Z280 addresses 000000-00FFFF are mapped to 0000-FFFF)
+    ;(so the Z280 addresses 000000-00FFFF are mapped into 0000-FFFF)
     ;for both user mode and system mode, with nothing being cacheable.
 
     xor a
     out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
 
-    ld bc,1000h + Z280.MMU_PORTS.BLOCK_MOVE
+    ld bc,1000h + Z280.MMU_PORTS.BLOCK_MOVE ;B = counter (16 descriptors)
     ld hl,0
-SET_MMU_LOOP_USER:
+.SET_MMU_LOOP_USER:
     outw (c),hl
     addw hl,0010h   ;Next 4K page
-    djnz SET_MMU_LOOP_USER
+    djnz .SET_MMU_LOOP_USER
 
-    ld b,10h
+    ld b,16
     ld hl,0
-SET_MMU_LOOP_SYSTEM:
+.SET_MMU_LOOP_SYSTEM:
     outw (c),hl
     addw hl,0010h   ;Next 4K page
-    djnz SET_MMU_LOOP_SYSTEM
+    djnz .SET_MMU_LOOP_SYSTEM
 
     ;Copy the Z280 resident code (including the interrupt/trap vectors table),
     ;which is located at addresses A000-BFFF in this ROM (second 8K half of page 2),
@@ -94,17 +108,17 @@ SET_MMU_LOOP_SYSTEM:
     ;
     ;See Z280 Technical Manual, chapter 7
     
-    ld a,0A000h/1000h
+    ld a,16 + 0A000h/1000h  ;System page descriptors go after the 16 user page descriptors
     out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
-    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h ;Map 021000 to A000
+    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h ;Map RESIDENT_CODE_START_ADDRESS + 1000h to A000
     outw (c),hl ;C is still BLOCK_MOVE, so this increases PAGE_DESCRIPTOR
 
-    ld hl,Z280.RESIDENT_CODE+4000h
+    ld hl,Z280.RESIDENT_CODE+1000h  ;Second half of the 8K resident code
     ld de,0A000h
     ld bc,1000h
     ldir
 
-    ld hl,RESIDENT_CODE_START_ADDRESS ;Map 020000 to B000
+    ld hl,RESIDENT_CODE_START_ADDRESS ;Map RESIDENT_CODE_START_ADDRESS to B000
     outw (c),hl
 
     ld hl,Z280.RESIDENT_CODE
@@ -115,7 +129,7 @@ SET_MMU_LOOP_SYSTEM:
     ;Now modify the mapping for system mode so that the resident code
     ;is mapped to A000-BFFF.
 
-    ld a,0A000h/1000h
+    ld a,16 + 0A000h/1000h
     out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
 
     if USE_CACHE eq 0
@@ -124,7 +138,7 @@ SET_MMU_LOOP_SYSTEM:
     ld hl,RESIDENT_CODE_START_ADDRESS + 2 ;Map RESIDENT_CODE_START_ADDRESS to A000, cacheable
     endif
     outw (c),hl ;C is still BLOCK_MOVE, so this increases PAGE_DESCRIPTOR
-    inc h ;Map RESIDENT_CODE_START_ADDRESS+1000h to B000, cacheable
+    addw hl,0010h ;Map RESIDENT_CODE_START_ADDRESS+1000h to B000 (cacheable or not as per L)
     outw (c),hl
 
     ;Finally, activate the MMU
@@ -161,11 +175,11 @@ SET_MMU_LOOP_SYSTEM:
     outw (c),hl
 
     ;Set interrupt/trap vector pointer
-    ld hl,RESIDENT_CODE_START_ADDRESS-(INT_TRAP_VECTOR-RESIDENT_CODE)
+    ld hl,RESIDENT_CODE_START_ADDRESS
     ld c,Z280.CONTROL_REGISTERS.INT_TRAP_VECTOR_POINTER
     outw (c),hl
 
-    ;Stay in system mode, no breakpoint-on-halt, no single step, enable all interrupt sources
+    ;Stay in system mode, no breakpoint-on-halt, no single-step, enable all interrupt sources
     ld hl,0000000001111111b
     ld c,Z280.CONTROL_REGISTERS.MSR
     outw (c),hl
@@ -182,6 +196,10 @@ SET_MMU_LOOP_SYSTEM:
     im 1
     else
     im 3
+    endif
+
+    if USE_CACHE neq 0
+    pcache
     endif
 
     ret
