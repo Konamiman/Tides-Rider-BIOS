@@ -49,9 +49,7 @@ INIT:
     ld l,0FFh
     ldctl (c),hl
 
-    if USE_CACHE eq 0
-
-    ;--- Disable the cache
+    ;--- Temporarly (or not, depending on USE_CACHE) disable the cache
     ;    (see Z280 Technical Manual, 3.2.4 and 8.3)
 
     ld c,Z280.CONTROL_REGISTERS.CACHE_CONTROL
@@ -71,8 +69,6 @@ INIT:
 
     ld l,11100000b  ;Disable cache
     ldctl (c),hl
-
-    endif
 
     ;--- Copy the resident code and configure the MMU
 

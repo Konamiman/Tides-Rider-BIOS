@@ -345,6 +345,7 @@ Z280_BOOT_OK:
     ;--- Code that the Z280 runs when it boots
 
 START_Z280:
+    di
     xor a
     ld (0),a ;We'll use this change to detect that the Z280 was present and booted
     jp CHGCPU.CONTINUE
