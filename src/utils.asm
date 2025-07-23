@@ -150,6 +150,7 @@ TOUPPER:
 ;                (bits 23-12 of address in bits 15-4 of HL)
 ;                Bits 3-0 of L: V WP C 0
 ;                (valid, write-protect, cacheable)
+;                H=0 maps the MSX memory
 ;    Modifies: F, BC, HL
 
 MAP_CONSECUTIVE:

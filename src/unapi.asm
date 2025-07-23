@@ -29,6 +29,7 @@ The code that patches the EXTBIO hook is in boot.asm
 
     include "msx.inc"
     include "tides.inc"
+    include "z280.inc"
 
 ;--- API version and implementation version
 
@@ -284,17 +285,19 @@ FN_RUNZ280_Z280:
 ;           (default mapped segments in the primary RAM slot)
 
 FN_COPY_MSX_TO_Z280:
-    di
 
-    ;If RAM is already visible in page 1, just do the copy.
-    ;Otherwise save current page 1 slot, switch RAM, do the copy, and restore slot.
+    ;We'll use the entire page 1 to map the source
+    ;and the 4K page B000-BFFF to map the destination.
+
+    ;--- If RAM is already visible in page 1, just do the copy.
+    ;    Otherwise save current page 1 slot, switch RAM, do the copy, and restore slot.
 
     push hl
     push de
     push bc
     call GETSLT1
     cp RAM_SLOT
-    jr z,.DO_COPY
+    jr z,.POP_DO_COPY
 
     push af
     ld a,RAM_SLOT
@@ -310,8 +313,17 @@ FN_COPY_MSX_TO_Z280:
     ld h,40h
     jp ENASLT
 
+.POP_DO_COPY:
+    pop bc
+    pop de
+    pop hl
+
+    ;--- Here we assume that the MSX RAM slot is mapped to page 1.
+    ;    Let's switch the appropriate TPA segment.
+
 .DO_COPY:
     push bc
+
     ld b,3  ;TPA segment in page 0
     ld a,h
     and 11000000b
@@ -325,15 +337,181 @@ FN_COPY_MSX_TO_Z280:
     dec b   ;Page 3
 
 .GOT_SEGMENT:
-    ;B = source RAM segment
+    ;Here B = source RAM segment
     ld a,b
     out (0FDh),a
+    ld ixh,a    ;Save RAM segment number for later
 
-    ;WIP
+    res 7,h ;Force source address to be in page 1
+    set 6,h
+
+    ld a,1
+    call CHGCPU.RUN
+
+    .cpu z280
+
+    ld a,16 + 0B000h/1000h  ;+16 because system page descriptors go after the 16 user page descriptors
+    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
+
+    push hl
+    ld h,0   ;Convert address to 4K segment number
+    ld a,d
+    and 11110000b
+    ld l,a
+    addw hl,RESIDENT_CODE_START_ADDRESS ;Convert to a ZTPA address
+    outw (c),hl
+    pop hl
+
+    xor a
+    call CHGCPU.RUN
+
+    .cpu z80
+
+    push hl
+    pop iy  ;Save segment number for later
+
+    ld a,d  ;Force destination address to be in the 4K page starting at B000
+    and 00001111b
+    or 0B0h
+    ld d,a
+
+.COPY_LOOP_STEP:
+
+    ;--- If source address+length goes beyond page 1, reduce the size to be copied in one go.
+    ;    Likewise if destination address+length goes beyond page 2.
+
+    pop bc
+    push bc
+
+    push hl
+    add hl,bc
+    dec hl
+    ld a,h
+    cp 80h
+    jr c,.OK_REDUCE_1
+    
+    pop bc  ;Source address
+    ld hl,8000h
+    or a
+    sbc hl,bc
+    push hl
+    pop bc
+
+.OK_REDUCE_1:
+    push de
+    pop hl
+    add hl,bc
+    dec hl
+    ld a,h
+    cp 0C0h
+    jr c,.OK_REDUCE_2
+
+    ld hl,0C000h
+    or a
+    sbc hl,bc
+    push hl
+    pop bc
+
+.OK_REDUCE_2:
+    pop hl
+
+    ; Here HL = Source in page 1, DE = Destination at 4K page B000, BC = length to copy in one go
+
+    ld a,1
+    call CHGCPU.RUN
+
+    push bc
+    ldir
+    pop bc
+
+    xor a
+    call CHGCPU.RUN
+
+    ;--- Update remaining length to copy, if it's 0 we're done
+
+    ex (sp),hl  ;Now HL = original length, source address after the copy in the stack
+    
+    or a
+    sbc hl,bc
+    ld a,h
+    or l
+    jr z,.COPY_END
+
+    ex (sp),hl  ;Now HL = source address after copy, remaining length in stack
+
+    ;--- If source address went beyond page 1, reset it to beginning of page 1
+    ;    and update the RAM segment number.
+
+    ld a,h
+    cp 80h
+    jr c,.OK_UPDATE_SRC
+
+    ld a,ixh
+    dec a
+    out (0FDh),a
+    ld ixh,a
+    ld hl,4000h
+.OK_UPDATE_SRC:
+
+    ;--- If destination address went beyond page 2, reset it to B000
+    ;    and update the value of the page descriptor.
+
+    ld a,d
+    cp 0C0h
+    jr c,.OK_UPDATE_DEST
+
+    ld a,1
+    call CHGCPU.RUN
+
+    .cpu z280
+
+    ld a,16 + 0B000h/1000h  ;+16 because system page descriptors go after the 16 user page descriptors
+    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
+    push iy
+    pop hl
+    addw hl,0010h
+    outw (c),hl
+    push hl
+    pop iy
+
+    xor a
+    call CHGCPU.RUN
+
+    .cpu z80
+
+.OK_UPDATE_DEST:
+
+    ;--- Proceed with the copy of the next block
+
+    jr .COPY_LOOP_STEP
+
+    ;--- Jump here once all the data has been copied
 
 .COPY_END:
-    ld a,2  ;TPA segment in page 1
+    pop hl
+
+    ;Restore Z280 resident code at B000
+
+    ld a,1
+    call CHGCPU.RUN
+
+    .cpu z280
+
+    ld a,16 + 0B000h/1000h
+    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h
+    ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
+    outw (c),hl
+
+    .cpu z80
+
+    ;Restore TPA segment in page 1
+
+    ld a,2
     out (0FDh),a
+
     ret
 
 
