@@ -4,15 +4,16 @@
 .COMMENT \
 
 This routine initializes the Z280 processor to its initial state
-(control registers and MMU descriptors). It runs at boot time
-and before a Z280 program is executed, but can also be executed manually
-via a dedicated UNAPI routine.
+(control registers and MMU descriptors) and copies the resident code.
+It runs at boot time but can also be executed manually via a dedicated
+UNAPI routine. The Z280 CPU active in system mode is assumed.
 
 See the comments in the file for the details on how the Z280 is initialized.
 
 \
 
     public Z280.INIT
+    extrn Z280.MAP_CONSECUTIVE
     extrn Z280.RESIDENT_CODE ;Assumed to be A000h
 
     module Z280
@@ -21,18 +22,8 @@ See the comments in the file for the details on how the Z280 is initialized.
 USE_CACHE: equ 3 ;0 = no, 1 = data, 2 = instructions, 3 = both
     endif
 
-    ifndef Z280.USE_IM3
-USE_IM3: equ 1 ;0 = no (use IM 1), 1 = yes
-    endif
-
-    ifndef Z280.RESIDENT_CODE_START_ADDRESS
-    ;Note that the Z280 RAM starts at address 010000,
-    ;but the first 64K are for the BIOS shadowing
-    ;so the first actual usable address is 020000.
-RESIDENT_CODE_START_ADDRESS: equ 0200h ;Bits 23 to 12 (11 to 0 are always 0)
-    endif
-
     include "z280.inc"
+    include "tides.inc"
 
     .cpu Z280
 
@@ -43,7 +34,7 @@ INIT:
 
     di
 
-    ;--- Set the I/O page to FFh, the value used for all the Z280 internal ports
+    ;--- Set the I/O page to FFh, the value used for all the Z280 internal ports.
 
     ld c,Z280.CONTROL_REGISTERS.IO_PAGE
     ld l,0FFh
@@ -70,78 +61,71 @@ INIT:
     ld l,11100000b  ;Disable cache
     ldctl (c),hl
 
-    ;--- Copy the resident code and configure the MMU
+    ;--- Configure the MMU and copy the resident code 
 
     ;Configure the MMU page descriptors so they match the MSX addressing space
     ;(so the Z280 addresses 000000-00FFFF are mapped into 0000-FFFF)
-    ;for both user mode and system mode, with nothing being cacheable.
+    ;for system mode. This is the same as what the Z280 sees when the MMU is disabled.
+    ;User mode mappings will be done right before a user application runs.
 
-    xor a
-    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ld a,16 ;Index of first MMU page descriptor for system mode
+    ld b,a  ;Map 16 4K pages = 64K
+    ld hl,0 ;Map from the beginning of the Z280 memory = the MSX memory
+    call Z280.MAP_CONSECUTIVE
 
-    ld bc,1000h + Z280.MMU_PORTS.BLOCK_MOVE ;B = counter (16 descriptors)
-    ld hl,0
-.SET_MMU_LOOP_USER:
+    ;Activate the MMU. Given the mappings done, nothing changes regarding the visible memory.
+
+    ld c,Z280.MMU_PORTS.MASTER_CONTROL
+    ld hl,1011101111100000b ;UTE=STE=1 (enable MMU), UPD=SPD=0 (disable program/data separation)
     outw (c),hl
-    addw hl,0010h   ;Next 4K page
-    djnz .SET_MMU_LOOP_USER
-
-    ld b,16
-    ld hl,0
-.SET_MMU_LOOP_SYSTEM:
-    outw (c),hl
-    addw hl,0010h   ;Next 4K page
-    djnz .SET_MMU_LOOP_SYSTEM
 
     ;Copy the Z280 resident code (including the interrupt/trap vectors table),
     ;which is located at addresses A000-BFFF in this ROM (second 8K half of page 2),
     ;into the Z280 RAM at address RESIDENT_CODE_START_ADDRESS.
     ;That code is intended to be mapped at A000-BFFF too when being used.
     ;
-    ;We'll make the copy in two steps:
+    ;We'll make the copy in two steps, using a "zig zag" strategy:
     ;1. Map RESIDENT_CODE_START_ADDRESS+1000h into A000-AFFF and copy the second half.
     ;2. Map RESIDENT_CODE_START_ADDRESS into B000-BFFF and copy the first half.
     ;
     ;See Z280 Technical Manual, chapter 7
     
-    ld a,16 + 0A000h/1000h  ;System page descriptors go after the 16 user page descriptors
+    ld c,Z280.MMU_PORTS.BLOCK_MOVE ;Writing to this port autoincreases the value at PAGE_DESCRIPTOR
+
+    ld a,16 + 0A000h/1000h  ;+16 because system page descriptors go after the 16 user page descriptors
     out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
-    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h ;Map RESIDENT_CODE_START_ADDRESS + 1000h to A000
-    outw (c),hl ;C is still BLOCK_MOVE, so this increases PAGE_DESCRIPTOR
-
-    ld hl,Z280.RESIDENT_CODE+1000h  ;Second half of the 8K resident code
-    ld de,0A000h
-    ld bc,1000h
-    ldir
-
-    ld hl,RESIDENT_CODE_START_ADDRESS ;Map RESIDENT_CODE_START_ADDRESS to B000
+    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h ;Map second half of Z280 resident code memory to A000
     outw (c),hl
 
-    ld hl,Z280.RESIDENT_CODE
+    ld hl,Z280.RESIDENT_CODE+1000h  ;Second half of the 8K resident code (expected to be B000)
+    ld de,0A000h
+    ld bc,1000h
+    ldir    ;TODO: Worth trying to use DMA for this?
+
+    ld hl,RESIDENT_CODE_START_ADDRESS ;Map first half of Z280 resident code memory to B000
+    outw (c),hl ;(remember: the previous out increased PAGE_DESCRIPTOR, so we're mapping B000-BFFF now)
+
+    ld a,16 + 0A000h/1000h
+    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a    
+    ld hl,00A0h
+    outw (c),hl ;...and map the A000-AFFF area back to the MSX memory too!
+
+    ld hl,Z280.RESIDENT_CODE ;Note that this is expected to be A000
     ld de,0B000h
     ld bc,1000h
     ldir
 
-    ;Now modify the mapping for system mode so that the resident code
-    ;is mapped to A000-BFFF.
+    ;Now modify the mapping for system mode so that the full Z280 resident code RAM
+    ;(8K) is mapped to A000-BFFF.
 
     ld a,16 + 0A000h/1000h
-    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
-
+    ld b,2
     if USE_CACHE eq 0
     ld hl,RESIDENT_CODE_START_ADDRESS ;Map RESIDENT_CODE_START_ADDRESS to A000, not cacheable
     else
     ld hl,RESIDENT_CODE_START_ADDRESS + 2 ;Map RESIDENT_CODE_START_ADDRESS to A000, cacheable
     endif
-    outw (c),hl ;C is still BLOCK_MOVE, so this increases PAGE_DESCRIPTOR
-    addw hl,0010h ;Map RESIDENT_CODE_START_ADDRESS+1000h to B000 (cacheable or not as per L)
-    outw (c),hl
-
-    ;Finally, activate the MMU
-
-    ld c,Z280.MMU_PORTS.MASTER_CONTROL
-    ld hl,1011101111100000b ;UTE=STE=1 (enable MMU), UPD=SPD=0 (disable program/data separation)
-    outw (c),hl
+    call Z280.MAP_CONSECUTIVE
 
     if USE_CACHE neq 0
 
@@ -182,17 +166,21 @@ INIT:
 
     ;--- Reset I/O page register to 0
 
+    if 0
+
+    ;No need for that! We'll never access the MSX ports while in Z280 system mode,
+    ;so it's actually more convenient to leave it at FFh for quick access
+    ;to the built-in port-mapped registers.
+
     ld c,Z280.CONTROL_REGISTERS.IO_PAGE
     ld l,0
     ldctl (c),hl
 
-    ;--- Set the interrupt mode
-
-    if USE_IM3 eq 0
-    im 1
-    else
-    im 3
     endif
+
+    ;--- Set the interrupt mode, but return with interrupts disabled
+
+    im 3
 
     if USE_CACHE neq 0
     pcache

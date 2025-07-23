@@ -16,12 +16,14 @@ The code that patches the EXTBIO hook is in boot.asm
     public UNAPI.EXTBIO_HANDLER
     public UNAPI.ENTRY_POINT
     extrn ALLOC.RUN
+    extrn GETSLT1
     extrn GETSLT2
     extrn TOUPPER
     extrn CHGCPU.RUN
     extrn Z280.INIT
 
     .extroot
+    .relab
 
     module UNAPI
 
@@ -274,14 +276,64 @@ FN_RUNZ280_Z280:
     ret
 
 
-;--- Routine 5: copy data from the MSX memory to Z280 memory
+;--- Routine 5: copy data from the MSX memory to ZTPA
 ;    Input: HL = source address in MSX memory
-;           DE = destination address in Z280 memory
+;           DE = destination address in ZTPA
 ;           BC = length
-;           The values for DE and DE+BC-1 must be in the same 4K page range
+;           Source data must be in the MSX TPA
+;           (default mapped segments in the primary RAM slot)
 
 FN_COPY_MSX_TO_Z280:
-    ;TODO: Implement this thing!
+    di
+
+    ;If RAM is already visible in page 1, just do the copy.
+    ;Otherwise save current page 1 slot, switch RAM, do the copy, and restore slot.
+
+    push hl
+    push de
+    push bc
+    call GETSLT1
+    cp RAM_SLOT
+    jr z,.DO_COPY
+
+    push af
+    ld a,RAM_SLOT
+    ld h,40h
+    call ENASLT
+    pop af
+    pop bc
+    pop de
+    pop hl
+    push af
+    call .DO_COPY
+    pop af
+    ld h,40h
+    jp ENASLT
+
+.DO_COPY:
+    push bc
+    ld b,3  ;TPA segment in page 0
+    ld a,h
+    and 11000000b
+    jr z,.GOT_SEGMENT   ;Page 0?
+    dec b
+    cp 01000000b    ;Page 1?
+    jr z,.GOT_SEGMENT
+    dec b
+    cp 10000000b    ;Page 2?
+    jr z,.GOT_SEGMENT
+    dec b   ;Page 3
+
+.GOT_SEGMENT:
+    ;B = source RAM segment
+    ld a,b
+    out (0FDh),a
+
+    ;WIP
+
+.COPY_END:
+    ld a,2  ;TPA segment in page 1
+    out (0FDh),a
     ret
 
 

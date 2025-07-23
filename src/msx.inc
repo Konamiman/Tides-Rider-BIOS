@@ -3,6 +3,8 @@
 
 ;--- MSX BIOS
 
+CALSLT: equ 001Ch
+ENASLT: equ 0024h
 CHPUT: equ 00A2h
 INITXT: equ 00D5h
 EXTROM: equ 015Fh
