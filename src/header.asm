@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl ROM header
 
+    name('ROM_HEADER')
+
 .COMMENT \
 
 The Tides Rider BIOS is a ROM intended to be flashed in page 2 of slot 0.
@@ -16,7 +18,7 @@ starting at address 8000h.
 
     ifdef DEBUGGING
         extrn UNAPI.ENTRY_POINT
-        extrn UNAPI.FN_COPY_MSX_TO_Z280
+        extrn UNAPI.FN_COPY_MSX_TO_ZTPA
     endif
     
 ROM_HEADER:
@@ -33,7 +35,7 @@ ROM_HEADER:
 
     ifdef DEBUGGING
 _8010: jp BOOT.RUN
-_8013: jp UNAPI.FN_COPY_MSX_TO_Z280
+_8013: jp UNAPI.FN_COPY_MSX_TO_ZTPA
     endif
 
     end

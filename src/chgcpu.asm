@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl Change CPU routine
 
+    name('CHGCPU')
+
 .COMMENT \
 
 This is the routine that switches to the Z80 or the Z280.

@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl ROM boot code
 
+    name('ROM_BOOT')
+
 .COMMENT \
 
 This file provides the ROM boot code, which will run when the MSX boots.

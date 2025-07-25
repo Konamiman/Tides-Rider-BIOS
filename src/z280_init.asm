@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl Z280 initialization code
 
+    name('Z280_INIT')
+
 .COMMENT \
 
 This routine initializes the Z280 processor to its initial state

@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl Miscellaneous utility routines
 
+    name('UTILS')
+
     public GETSLT2
     public GETSLT1
     public TOUPPER

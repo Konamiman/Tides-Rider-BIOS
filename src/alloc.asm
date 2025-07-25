@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl Page 3 memory allocation routine
 
+	name ('ALLOC')
+
     public ALLOC.RUN
 
     module ALLOC

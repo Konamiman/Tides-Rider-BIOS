@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl First part of the Z280 resident code
 
+    name('Z280_RESIDENT')
+
 .COMMENT \
 
 This file contains the first part of the Z280 resident code, containing:

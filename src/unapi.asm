@@ -1,6 +1,8 @@
     title Tides Rider BIOS with Z280 support
     subttl UNAPI handler
 
+    name ('UNAPI')
+
 .COMMENT \
 
 This file contains all the UNAPI related code: the EXTBIO hook handler,
@@ -23,7 +25,7 @@ The code that patches the EXTBIO hook is in boot.asm
     extrn Z280.INIT
 
     ifdef DEBUGGING
-        public UNAPI.FN_COPY_MSX_TO_Z280
+        public UNAPI.FN_COPY_MSX_TO_ZTPA
     endif
 
     .extroot
@@ -194,8 +196,8 @@ FN_TABLE:
 FN_0: dw FN_INFO
 FN_1: dw FN_Z280INFO
 FN_2: dw FN_INITZ280
-FN_3: dw FN_COPY_MSX_TO_Z280
-FN_4: dw FN_COPY_Z280_TO_MSX
+FN_3: dw FN_COPY_MSX_TO_ZTPA
+FN_4: dw FN_COPY_ZTPA_TO_MSX
 FN_5: dw FN_RUNZ280_MSX
 FN_6: dw FN_RUNZ280_Z280
 FN_TABLE_END:
@@ -265,12 +267,55 @@ FN_INITZ280:
 ;           Source data must be in the MSX TPA
 ;           (default mapped segments in the primary RAM slot)
 
-FN_COPY_MSX_TO_Z280:
+FN_COPY_MSX_TO_ZTPA:
+    ld ix,0
+    jr COPY_MSX_Z280_CORE
 
-    ;We'll use the entire page 1 to map the source
-    ;and the 4K page B000-BFFF to map the destination.
 
-    ;--- If RAM is already visible in page 1, just do the copy.
+;--- Routine 4: copy data from ZTPA to MSX memory
+;    Input: HL = source address in ZTPA
+;           DE = destination address in MSX memory
+;           BC = length
+;           Data will be copied to the MSX TPA
+;           (default mapped segments in the primary RAM slot)
+
+FN_COPY_ZTPA_TO_MSX:
+    ex de,hl
+    ld ix,1
+    ;jr COPY_MSX_Z280_CORE
+
+
+; Core routine to copy data between MSX memory and ZTPA.
+;
+; Input: HL = Initial address in MSX TPA
+;             (TPA = primary RAM slot, default RAM segments)
+;             Default RAM segments are assumed to be 3, 2, 1, 0
+;             for Z80 pages 0, 1, 2, 3 respectively.
+;        DE = Initial address in ZTPA
+;        BC = Length
+;        IXl = 0 for MSX to Z280 copy
+;              1 for Z280 to MSX copy
+;
+; Strategy:
+;
+; 1. Map the MSX RAM slot in page 1, and activate the appropriate 16K
+;    segment according to the initial address passed in HL.
+;    Convert HL to a page 1 address.
+; 2. Map the appropriate 4K ZTPA segment at B000-BFFF, according to
+;    the initial address passed in DE. Convert DE to the B000-BFFF range.
+; 3. Copy as many bytes as possible so that the source/destination
+;    address in MSX memory doesn't go beyond 7FFF (the end of Z80 page 1)
+;    AND the source/destination ZTPA address doesn't go beyond BFFF.
+; 4. After the copy, if the MSX TPA address reaches 8000, reset it to 4000
+;    and map the next segment in page 1 (the current segment minus one).
+; 5. Also, if the ZTPA address reaches C000, reset it to B000
+;    and map the next 4K ZTPA segment in B000-BFFF.
+; 6. Do BC = BC - amount copied, and repeat from 3 as long as
+;    there's more data to copy.
+
+COPY_MSX_Z280_CORE:
+
+    ;--- If MSX RAM is already visible in page 1, just do the copy.
     ;    Otherwise save current page 1 slot, switch RAM, do the copy, and restore slot.
 
     push hl
@@ -283,7 +328,9 @@ FN_COPY_MSX_TO_Z280:
     push af
     ld a,RAM_SLOT
     ld h,40h
+    push ix
     call ENASLT
+    pop ix
     pop af
     pop bc
     pop de
@@ -300,12 +347,12 @@ FN_COPY_MSX_TO_Z280:
     pop hl
 
     ;--- Here we assume that the MSX RAM slot is mapped to page 1.
-    ;    Let's switch the appropriate TPA segment.
+    ;    Let's switch in the appropriate TPA segment.
 
 .DO_COPY:
     push bc
 
-    ld b,3  ;TPA segment in page 0
+    ld b,3  ;TPA segment for page 0
     ld a,h
     and 11000000b
     jr z,.GOT_SEGMENT   ;Page 0?
@@ -320,7 +367,7 @@ FN_COPY_MSX_TO_Z280:
 .GOT_SEGMENT:
     ;Here B = source RAM segment
     ld a,b
-    out (0FDh),a
+    out (P1_MAPPED_RAM_PORT),a
     ld ixh,a    ;Save RAM segment number for later
 
     res 7,h ;Force source address to be in page 1
@@ -342,7 +389,7 @@ FN_COPY_MSX_TO_Z280:
     ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
 
     push hl
-    ld h,0   ;Convert address to 4K segment number
+    ld h,0   ;Convert ZTPA address to a ZTPA relative 4K segment number
     ld a,d
     and 11110000b
     ld l,a
@@ -351,7 +398,9 @@ FN_COPY_MSX_TO_Z280:
         nop
         nop
     else
-        addw hl,RESIDENT_CODE_START_ADDRESS ;Convert to a ZTPA address
+        ;Convert the ZTPA relative segment number to an actual Z280 memory address...
+        addw hl,RESIDENT_CODE_START_ADDRESS
+        ;...then map it in.
         outw (c),hl
     endif
     pop hl
@@ -407,7 +456,7 @@ FN_COPY_MSX_TO_Z280:
 .OK_REDUCE_2:
     pop hl
 
-    ; Here HL = Source in page 1, DE = Destination at 4K page B000, BC = length to copy in one go
+    ; Here HL = Source in page 1, DE = Destination in 4K page B000, BC = length to copy in one go
 
     ld a,1
     call CHGCPU.RUN
@@ -417,13 +466,22 @@ FN_COPY_MSX_TO_Z280:
         nop
         nop
         nop
-        add hl,bc
+        add hl,bc   ;Simulate the effect of LDIR on registers
         ex de,hl
         add hl,bc
         ex de,hl
         ld bc,0
     else
-        ldir
+        ld a,ixl
+        or a
+        jr nz,.EX_THEN_LDIR
+        ldir    ;Copy from MSX memory to Z280 memory
+        jr .LDIR_DONE
+.EX_THEN_LDIR:
+        ex de,hl
+        ldir    ;Copy from Z280 memory to MSX memory
+        ex de,hl
+.LDIR_DONE:
     endif
     pop bc
 
@@ -432,7 +490,7 @@ FN_COPY_MSX_TO_Z280:
 
     ;--- Update remaining length to copy, if it's 0 we're done
 
-    ex (sp),hl  ;Now HL = original length, source address after the copy in the stack
+    ex (sp),hl  ;Now HL = original length, MSX TPA address after the copy in the stack
     
     or a
     sbc hl,bc
@@ -440,7 +498,7 @@ FN_COPY_MSX_TO_Z280:
     or l
     jr z,.COPY_END
 
-    ex (sp),hl  ;Now HL = source address after copy, remaining length in stack
+    ex (sp),hl  ;Now HL = MSX TPA address after copy, remaining length in stack
 
     ;--- If source address went beyond page 1, reset it to beginning of page 1
     ;    and update the RAM segment number.
@@ -449,9 +507,9 @@ FN_COPY_MSX_TO_Z280:
     cp 80h
     jr c,.OK_UPDATE_SRC
 
-    ld a,ixh
+    ld a,ixh    ;TPA segment currently mapped in page 1
     dec a
-    out (0FDh),a
+    out (P1_MAPPED_RAM_PORT),a
     ld ixh,a
     ld hl,4000h
 .OK_UPDATE_SRC:
@@ -485,7 +543,7 @@ FN_COPY_MSX_TO_Z280:
         nop
     else
         inw hl,(c)
-        addw hl,0010h
+        addw hl,0010h   ;Next 4K Z280 memory segment
         outw (c),hl
     endif
 
@@ -506,7 +564,7 @@ FN_COPY_MSX_TO_Z280:
     ;--- Jump here once all the data has been copied
 
 .COPY_END:
-    pop hl
+    pop hl  ;Discard saved MSX TPA address
 
     ;Restore Z280 resident code at B000
 
@@ -529,22 +587,11 @@ FN_COPY_MSX_TO_Z280:
 
     .cpu z80
 
-    ;Restore TPA segment in page 1
+    ;Restore original TPA segment in page 1
 
     ld a,2
-    out (0FDh),a
+    out (P1_MAPPED_RAM_PORT),a
 
-    ret
-
-
-;--- Routine 4: copy data from the Z280 memory to MSX memory
-;    Input: HL = source address in Z280 memory
-;           DE = destination address in MSX memory
-;           BC = length
-;           The values for HL and HL+BC-1 must be in the same 4K page range
-
-FN_COPY_Z280_TO_MSX:
-    ;TODO: Implement this thing!
     ret
 
 
