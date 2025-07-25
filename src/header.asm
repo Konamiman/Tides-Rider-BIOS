@@ -13,13 +13,27 @@ starting at address 8000h.
 \
 
     extrn BOOT.RUN
+
+    ifdef DEBUGGING
+        extrn UNAPI.ENTRY_POINT
+        extrn UNAPI.FN_COPY_MSX_TO_Z280
+    endif
     
 ROM_HEADER:
     db 41h,42h
-    dw BOOT.RUN
+    ifdef DEBUGGING
+        dw _8010
+    else
+        dw BOOT.RUN
+    endif
     dw 0 ;STATEMENT handler
     dw 0 ;DEVICE handler
     dw 0 ;TEXT handler
     ds 6,0 ;Reserved
+
+    ifdef DEBUGGING
+_8010: jp BOOT.RUN
+_8013: jp UNAPI.FN_COPY_MSX_TO_Z280
+    endif
 
     end

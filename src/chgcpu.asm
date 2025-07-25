@@ -45,7 +45,9 @@ CONTINUE:
     in a,(0F0h) ;TODO: Adjust to the definitive port
     and 11111110b
     or b
-    out (0F0h),a
+    ifndef FAKE_Z280
+        out (0F0h),a
+    endif
 
     DI
     NOP

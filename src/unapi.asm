@@ -22,6 +22,10 @@ The code that patches the EXTBIO hook is in boot.asm
     extrn CHGCPU.RUN
     extrn Z280.INIT
 
+    ifdef DEBUGGING
+        public UNAPI.FN_COPY_MSX_TO_Z280
+    endif
+
     .extroot
     .relab
 
@@ -190,10 +194,10 @@ FN_TABLE:
 FN_0: dw FN_INFO
 FN_1: dw FN_Z280INFO
 FN_2: dw FN_INITZ280
-FN_3: dw FN_RUNZ280_MSX
-FN_4: dw FN_RUNZ280_Z280
-FN_5: dw FN_COPY_MSX_TO_Z280
-FN_6: dw FN_COPY_Z280_TO_MSX
+FN_3: dw FN_COPY_MSX_TO_Z280
+FN_4: dw FN_COPY_Z280_TO_MSX
+FN_5: dw FN_RUNZ280_MSX
+FN_6: dw FN_RUNZ280_Z280
 FN_TABLE_END:
 
 
@@ -254,30 +258,7 @@ FN_INITZ280:
     jp CHGCPU.RUN
 
 
-;--- Routine 3: run a Z280 program in MSX memory
-;    Input: All registers as they will be accepted by the Z280 program
-;           Program address at TEMP9 (F7B8h)
-;           AF for the program at TEMP8 (F69Fh)
-;    Output: All registers as returned by the Z280 program
-
-FN_RUNZ280_MSX:
-    ;TODO: Implement this thing!
-    ret
-
-
-;--- Routine 4: run a Z280 program in Z280 memory
-;    Input: All registers as they will be accepted by the Z280 program
-;           Program address at TEMP9 (F7B8h)
-;           AF for the program at TEMP8 (F69Fh)
-;           Z280 RAM page id at TEMP3 (F69Dh)
-;    Output: All registers as returned by the Z280 program
-
-FN_RUNZ280_Z280:
-    ;TODO: Implement this thing!
-    ret
-
-
-;--- Routine 5: copy data from the MSX memory to ZTPA
+;--- Routine 3: copy data from the MSX memory to ZTPA
 ;    Input: HL = source address in MSX memory
 ;           DE = destination address in ZTPA
 ;           BC = length
@@ -351,7 +332,13 @@ FN_COPY_MSX_TO_Z280:
     .cpu z280
 
     ld a,16 + 0B000h/1000h  ;+16 because system page descriptors go after the 16 user page descriptors
-    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+    else
+        out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    endif
     ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
 
     push hl
@@ -359,17 +346,20 @@ FN_COPY_MSX_TO_Z280:
     ld a,d
     and 11110000b
     ld l,a
-    addw hl,RESIDENT_CODE_START_ADDRESS ;Convert to a ZTPA address
-    outw (c),hl
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+    else
+        addw hl,RESIDENT_CODE_START_ADDRESS ;Convert to a ZTPA address
+        outw (c),hl
+    endif
     pop hl
 
     xor a
     call CHGCPU.RUN
 
     .cpu z80
-
-    push hl
-    pop iy  ;Save segment number for later
 
     ld a,d  ;Force destination address to be in the 4K page starting at B000
     and 00001111b
@@ -392,6 +382,7 @@ FN_COPY_MSX_TO_Z280:
     jr c,.OK_REDUCE_1
     
     pop bc  ;Source address
+    push bc
     ld hl,8000h
     or a
     sbc hl,bc
@@ -409,7 +400,7 @@ FN_COPY_MSX_TO_Z280:
 
     ld hl,0C000h
     or a
-    sbc hl,bc
+    sbc hl,de
     push hl
     pop bc
 
@@ -422,7 +413,18 @@ FN_COPY_MSX_TO_Z280:
     call CHGCPU.RUN
 
     push bc
-    ldir
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+        add hl,bc
+        ex de,hl
+        add hl,bc
+        ex de,hl
+        ld bc,0
+    else
+        ldir
+    endif
     pop bc
 
     xor a
@@ -461,23 +463,37 @@ FN_COPY_MSX_TO_Z280:
     cp 0C0h
     jr c,.OK_UPDATE_DEST
 
+    push hl
+
     ld a,1
     call CHGCPU.RUN
 
     .cpu z280
 
     ld a,16 + 0B000h/1000h  ;+16 because system page descriptors go after the 16 user page descriptors
-    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+    else
+        out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+    endif
     ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
-    push iy
-    pop hl
-    addw hl,0010h
-    outw (c),hl
-    push hl
-    pop iy
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+    else
+        inw hl,(c)
+        addw hl,0010h
+        outw (c),hl
+    endif
 
     xor a
     call CHGCPU.RUN
+
+    pop hl
+    ld de,0B000h
 
     .cpu z80
 
@@ -499,11 +515,17 @@ FN_COPY_MSX_TO_Z280:
 
     .cpu z280
 
-    ld a,16 + 0B000h/1000h
-    out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
-    ld hl,RESIDENT_CODE_START_ADDRESS + 0010h
-    ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
-    outw (c),hl
+    ifdef FAKE_Z280
+        nop
+        nop
+        nop
+    else
+        ld a,16 + 0B000h/1000h
+        out (Z280.MMU_PORTS.PAGE_DESCRIPTOR),a
+        ld hl,RESIDENT_CODE_START_ADDRESS + 0010h
+        ld c,Z280.MMU_PORTS.DESCRIPTOR_SELECT
+        outw (c),hl
+    endif
 
     .cpu z80
 
@@ -515,7 +537,7 @@ FN_COPY_MSX_TO_Z280:
     ret
 
 
-;--- Routine 6: copy data from the Z280 memory to MSX memory
+;--- Routine 4: copy data from the Z280 memory to MSX memory
 ;    Input: HL = source address in Z280 memory
 ;           DE = destination address in MSX memory
 ;           BC = length
@@ -524,6 +546,30 @@ FN_COPY_MSX_TO_Z280:
 FN_COPY_Z280_TO_MSX:
     ;TODO: Implement this thing!
     ret
+
+
+;--- Routine 5: run a Z280 program in MSX memory
+;    Input: All registers as they will be accepted by the Z280 program
+;           Program address at TEMP9 (F7B8h)
+;           AF for the program at TEMP8 (F69Fh)
+;    Output: All registers as returned by the Z280 program
+
+FN_RUNZ280_MSX:
+    ;TODO: Implement this thing!
+    ret
+
+
+;--- Routine 6: run a Z280 program in Z280 memory
+;    Input: All registers as they will be accepted by the Z280 program
+;           Program address at TEMP9 (F7B8h)
+;           AF for the program at TEMP8 (F69Fh)
+;           Z280 RAM page id at TEMP3 (F69Dh)
+;    Output: All registers as returned by the Z280 program
+
+FN_RUNZ280_Z280:
+    ;TODO: Implement this thing!
+    ret
+
 
 
 ;*****************

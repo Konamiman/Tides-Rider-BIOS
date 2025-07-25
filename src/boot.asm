@@ -296,6 +296,11 @@ BOOT_Z280:
     ld a,1
     call CHGCPU.RUN
 
+    ifdef FAKE_Z280
+        xor a
+        ld (0),a
+    endif
+
     ;> At this point either the Z280 was found (and then booted and wrote a 0 at address 0)
     ;  or not (and then address 0 still contains the JP instructiom)
 
