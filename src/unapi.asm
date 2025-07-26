@@ -23,6 +23,8 @@ The code that patches the EXTBIO hook is in boot.asm
     extrn TOUPPER
     extrn CHGCPU.RUN
     extrn Z280.INIT
+    extrn Z280.MAP_CONSECUTIVE
+    extrn Z280.SAVE_Z80_STACK
 
     ifdef DEBUGGING
         public UNAPI.FN_COPY_MSX_TO_ZTPA
@@ -597,8 +599,8 @@ COPY_MSX_Z280_CORE:
 
 ;--- Routine 5: run a Z280 program in MSX memory
 ;    Input: All registers as they will be accepted by the Z280 program
-;           Program address at TEMP9 (F7B8h)
-;           AF for the program at TEMP8 (F69Fh)
+;           Program address at ARG (F847h)
+;           AF for the program at ARG+2
 ;    Output: All registers as returned by the Z280 program
 
 FN_RUNZ280_MSX:
@@ -606,17 +608,64 @@ FN_RUNZ280_MSX:
     ret
 
 
-;--- Routine 6: run a Z280 program in Z280 memory
+;--- Routine 6: run a Z280 program in ZTPA
 ;    Input: All registers as they will be accepted by the Z280 program
-;           Program address at TEMP9 (F7B8h)
-;           AF for the program at TEMP8 (F69Fh)
-;           Z280 RAM page id at TEMP3 (F69Dh)
+;           Program address (ZTPA relative) at ARG (F847h)
+;           AF for the program at ARG+2
+;           SP for the program at ARG+4 (should be FFFFh)
 ;    Output: All registers as returned by the Z280 program
+;           (ARG) = PC in the Z280 after the SC 0
+;           (ARG+2) = SP in the Z280
+;
+; The program is expected to finish execution with SC 0
 
 FN_RUNZ280_Z280:
-    ;TODO: Implement this thing!
-    ret
+    ld a,1
+    call CHGCPU.RUN
 
+    .cpu z280
+
+    ld (ARG+6),hl
+
+    ;Save the Z80 stack
+
+    ld hl,Z280.SAVE_Z80_STACK
+    ld (hl),sp
+    
+    ;Map the entire ZTPA for user mode
+
+    push bc
+    xor a
+    ld b,16
+    ld hl,ZTPA_START_ADDRESS + 2 ;Cacheable
+    call Z280.MAP_CONSECUTIVE
+    pop bc
+
+    ;Set stack for user mode
+
+    ld hl,(ARG+4)
+    ldctl usp,hl
+
+    ;Push data for RETIL
+
+    ld hl,%0100000000000000 ;MSR: User mode, all interrupt sources disabled
+    ;TODO: Once interrupts can be properly handled, set interupt sources as enabled: ld hl,%0100000001111111
+    ld (0BFFCh),hl
+    ld hl,(ARG) ;Value for PC
+    ld (0BFFEh),hl
+
+    ;Set stack for system mode and return
+
+    ld sp,0BFFCh
+
+    ld hl,(ARG)
+    push hl
+    pop af
+    ld hl,(ARG+6)
+
+    retil   ;Set system SP to C000 and run the program in user mode
+
+    .cpu z80
 
 
 ;*****************

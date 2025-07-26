@@ -19,6 +19,7 @@ Specific exception handlers are located in separate files which are to be linked
 
 \
     public Z280.RESIDENT_CODE
+    public Z280.SAVE_Z80_STACK
     extrn PRINT
     extrn CHGCPU.RUN
     extrn CHGCPU.CONTINUE
@@ -200,10 +201,54 @@ TRY_HANDLE_EPU_INTERNAL:
     ret
 
 
+;--- System calls (SC instruction) handler.
+;    If the system call number is MAX_SYSTEM_CALL or less, HANDLE_SC_number will be invoked.
+;    Otherwise the handler will do nothing and return with registers unmodified.
+;    The default handler will never be invoked.
+
+MAX_SYSTEM_CALL: equ 0
+
 TRY_HANDLE_SYSTEM_CALL:
-    ;TODO: Implement. For now just return the argument in HL.
+    inc sp
+    inc sp ;Discard return address from HANDLE_SYSTEM_CALL (disables default handler)
+
+    ex (sp),hl  ;HL = Argument passed to SC, (SP) = HL passed to SC
+    push af
+    cpw hl,MAX_SYSTEM_CALL+1
+    jr nc,.UNHANDLED
+    pop af
+
+    push .FINISH
+    addw hl,hl  ;HL = 2 * argument passed to SC
+    ldw hl,(hl+SYSTEM_CALL_TABLE)
+    push hl
+    ldw hl,(sp+4) ;Restore HL passed to SC
+    ret ;Will run the system call handler, then jump to .FINISH
+
+.FINISH:
+    inc sp  ;Discard the pushed HL (if handled) or SC argument (if unhandled)
+    inc sp
+    retil
+
+.UNHANDLED:
+    ;Just return with registers unchanged
+    pop af
     pop hl
     retil
+
+    ;--- Definition of the system calls table
+
+CURRENT_SYSTEM_CALL: defl -1
+
+SC_TABLE_ENTRY: macro number
+    dw HANDLE_SC_&number##
+    endm
+
+SYSTEM_CALL_TABLE:
+    rept MAX_SYSTEM_CALL+1
+CURRENT_SYSTEM_CALL: defl CURRENT_SYSTEM_CALL+1
+    SC_TABLE_ENTRY %CURRENT_SYSTEM_CALL
+    endm
 
 
 TRY_HANDLE_INT_A:
@@ -218,6 +263,7 @@ TRY_HANDLE_INT_A:
     ;--- Variables area
 
 EXCEPTION_NAME_ADDRESS: dw 0
+SAVE_Z80_STACK: dw 0
 
     endmod
 
