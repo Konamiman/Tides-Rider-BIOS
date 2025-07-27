@@ -20,6 +20,7 @@ Specific exception handlers are located in separate files which are to be linked
 \
     public Z280.RESIDENT_CODE
     public Z280.SAVE_Z80_STACK
+    public Z280.SP_FOR_RETIL
     extrn PRINT
     extrn CHGCPU.RUN
     extrn CHGCPU.CONTINUE
@@ -202,15 +203,26 @@ TRY_HANDLE_EPU_INTERNAL:
 
 
 ;--- System calls (SC instruction) handler.
+;
 ;    If the system call number is MAX_SYSTEM_CALL or less, HANDLE_SC_number will be invoked.
 ;    Otherwise the handler will do nothing and return with registers unmodified.
 ;    The default handler will never be invoked.
+;
+;    Handlers should check SP_FOR_RETIL if they need to get the pushed MSR or PC
+;    that will be handled by RETIL once they finish execution
+;    (note that the pushed PC is the address after the SC instruction)
+;
+;    To add a new system call with number N:
+;    1. Add the code in system_calls/sc_N.asm, with public symbol HANDLE_SC_N
+;    2. Update MAX_SYSTEM_CALL below to N
+;    3. Update the definition of SYSCALLS in Makefile to include sc_n.rel
 
-MAX_SYSTEM_CALL: equ 0
+MAX_SYSTEM_CALL: equ 2
 
 TRY_HANDLE_SYSTEM_CALL:
     inc sp
     inc sp ;Discard return address from HANDLE_SYSTEM_CALL (disables default handler)
+    ld (SP_FOR_RETIL),sp
 
     ex (sp),hl  ;HL = Argument passed to SC, (SP) = HL passed to SC
     push af
@@ -219,14 +231,18 @@ TRY_HANDLE_SYSTEM_CALL:
     pop af
 
     push .FINISH
+    push af
     addw hl,hl  ;HL = 2 * argument passed to SC
+    pop af
     ldw hl,(hl+SYSTEM_CALL_TABLE)
     push hl
+    ;ldw hl,(sp+8); +0: handler address, +2: .FINISH, +4: saved HL, +6: MSR for RETIL, +8: PC for RETIL
+    ;ld (PC_AFTER_SC),hl
     ldw hl,(sp+4) ;Restore HL passed to SC
     ret ;Will run the system call handler, then jump to .FINISH
 
 .FINISH:
-    inc sp  ;Discard the pushed HL (if handled) or SC argument (if unhandled)
+    inc sp  ;Discard the pushed HL
     inc sp
     retil
 
@@ -236,9 +252,11 @@ TRY_HANDLE_SYSTEM_CALL:
     pop hl
     retil
 
-    ;--- Definition of the system calls table
+    ;--- Definition of the system calls table.
+    ;    A macro is used to generate the entries:
+    ;    dw HANDLE_SC_0, HANDLE_SC_1, etc.
 
-CURRENT_SYSTEM_CALL: defl -1
+CURRENT_SYSTEM_CALL: defl 0
 
 SC_TABLE_ENTRY: macro number
     dw HANDLE_SC_&number##
@@ -246,8 +264,8 @@ SC_TABLE_ENTRY: macro number
 
 SYSTEM_CALL_TABLE:
     rept MAX_SYSTEM_CALL+1
-CURRENT_SYSTEM_CALL: defl CURRENT_SYSTEM_CALL+1
     SC_TABLE_ENTRY %CURRENT_SYSTEM_CALL
+CURRENT_SYSTEM_CALL: defl CURRENT_SYSTEM_CALL+1
     endm
 
 
@@ -264,6 +282,7 @@ TRY_HANDLE_INT_A:
 
 EXCEPTION_NAME_ADDRESS: dw 0
 SAVE_Z80_STACK: dw 0
+SP_FOR_RETIL: dw 0
 
     endmod
 

@@ -201,7 +201,7 @@ FN_2: dw FN_INITZ280
 FN_3: dw FN_COPY_MSX_TO_ZTPA
 FN_4: dw FN_COPY_ZTPA_TO_MSX
 FN_5: dw FN_RUNZ280_MSX
-FN_6: dw FN_RUNZ280_Z280
+FN_6: dw FN_RUNZ280_ZTPA
 FN_TABLE_END:
 
 
@@ -619,7 +619,7 @@ FN_RUNZ280_MSX:
 ;
 ; The program is expected to finish execution with SC 0
 
-FN_RUNZ280_Z280:
+FN_RUNZ280_ZTPA:
     ld a,1
     call CHGCPU.RUN
 
@@ -646,7 +646,7 @@ FN_RUNZ280_Z280:
     ld hl,(ARG+4)
     ldctl usp,hl
 
-    ;Push data for RETIL
+    ;Set stack for system mode and push data for RETIL
 
     ld hl,%0100000000000000 ;MSR: User mode, all interrupt sources disabled
     ;TODO: Once interrupts can be properly handled, set interupt sources as enabled: ld hl,%0100000001111111
@@ -654,15 +654,24 @@ FN_RUNZ280_Z280:
     ld hl,(ARG) ;Value for PC
     ld (0BFFEh),hl
 
-    ;Set stack for system mode and return
-
     ld sp,0BFFCh
+
+    ;Reset the I/O page to 0
+
+    push bc
+    ld c,Z280.CONTROL_REGISTERS.IO_PAGE
+    ld l,0
+    ldctl (c),hl
+    pop bc
+
+    ;Restore registers and do the RETIL
 
     ld hl,(ARG)
     push hl
     pop af
     ld hl,(ARG+6)
 
+    di ;TODO: EI once interrupts can be properly handled
     retil   ;Set system SP to C000 and run the program in user mode
 
     .cpu z80

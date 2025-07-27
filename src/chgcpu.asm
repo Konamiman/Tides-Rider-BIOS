@@ -14,6 +14,7 @@ should be done by executing SC 0 from within the Z280 code.
 
     public CHGCPU.RUN
     public CHGCPU.CONTINUE
+    public CHGCPU.SETZ80
 
     module CHGCPU
 
@@ -22,6 +23,13 @@ should be done by executing SC 0 from within the Z280 code.
     ;
     ;Note that this routine returns with interrupts disabled.
     
+SETZ80:
+    push af
+    xor a
+    call RUN
+    pop af
+    ret
+
 RUN:
     DI
     PUSH    HL
